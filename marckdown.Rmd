@@ -1,0 +1,162 @@
+---
+title: "Medición de la ganancia total de elevación (TEG) en senderos localizados en la Región metropolitana(RM, Chile) mediante DEMs"
+author: "Benjamín Andrés Carrizo Alarcón"
+date: "22 de diciembre de 2022"
+output: html_document
+runtime: shiny
+---
+
+```{r setup , include=FALSE}
+options(rgl.useNULL = TRUE)
+library(GPStream)
+library(knitr)
+library(shiny)
+library(utils)
+source("Load RM DEMs.R")
+source("Rayshader_3D_plot.R")
+source("Calculo de TEGs.R")
+library(rgl)
+rgl::setupKnitr(autoprint = TRUE) #### New
+knitr::knit_hooks$set(webgl = hook_webgl)
+```
+
+
+## Resumen estadístico de tu salida deportiva:
+```{r, echo=FALSE}
+segment <<- read_stream("GPS_Test/stream_raw_225.fit")
+segment <<-  segment[order(segment$timestamp , decreasing = FALSE),]
+segment <<- segment %>% uniform_stream()
+segment <<- segment %>% differential_stream()
+summary(segment)
+```
+## Visualización de DEMs gratuitos de la RM:
+```{r, echo=FALSE}
+# Define the list of rasters as a named list, where each element is a raster object
+rasters <- list("SRTM1arc" = Srtm_1_arc,
+                "SRTM3arc" = Srtm_void_filled_3_arc,
+                "Alos Palsar 2" = Alos_lon_lat,
+                "NASADEM1arc" = nasadem_1_arc,
+                "TanDEM" = tanDEM,
+                "MeritDEM" = Merit_DEM)
+
+# Use the selectInput function to create a dropdown menu for selecting a raster
+ui <- fluidPage(
+  selectInput("raster", "Select a raster:", choices = names(rasters)),
+  plotOutput("plot")
+)
+
+# Use the input$raster variable to get the selected raster
+server <- function(input, output) {
+  raster <- reactive({rasters[[input$raster]]})
+  output$plot <- renderPlot({
+    plot(raster())
+  })
+}
+
+shinyApp(ui, server)
+
+```
+
+
+## Visualización 3D de tu circuito mediante el uso de DEMs gratuitos:
+```{r, echo=FALSE}
+rasters <- list("SRTM1arc" = Srtm_1_arc,
+                "SRTM3arc" = Srtm_void_filled_3_arc,
+                "Alos Palsar 2" = Alos_lon_lat,
+                "NASADEM1arc" = nasadem_1_arc,
+                "TanDEM" = tanDEM,
+                "MeritDEM" = Merit_DEM)
+ui <- fluidPage(
+  selectInput("raster", "Select a raster:", choices = names(rasters)),
+  rglwidgetOutput("plot")
+)
+server <- function(input, output) {
+  raster <- reactive({rasters[[input$raster]]})
+  output$plot <- renderRglwidget({
+    three_plot_seg(raster(), segment , input$raster)
+    rglwidget()
+  })
+}
+
+shinyApp(ui, server)
+```
+
+## Visualización 3D de tu circuito mediante el uso de DEM SRTM(elevatr z=14) suavizado con la técnica DCT:
+
+Transformada discreta del coseno: Kx es el porcentaje de coeficientes a mantener, mientras más chico es el número más suavizado quedará el terreno
+
+```{r, echo=FALSE}
+ui <- fluidPage(
+  numericInput("kx", "Type a value for kx between 1-0.1:", value = 0.1, min = 0.1, max = 1, step = 0.1),
+  #numericInput("vl", "Type a value for vl between 0.99-0.01:", value = 0.05, min = 0.01, max = 0.99, step = 0.01),
+  actionButton("go", "Go"),
+  rglwidgetOutput("plot")
+)
+
+server <- function(input, output) {
+  raster_aux <- eventReactive(input$go, {
+    dct_or_dct(segment, dct =TRUE ,kx = input$kx, vl=0.05)
+  })
+  
+  output$plot <- renderRglwidget({
+    three_plot_seg(raster_aux(), segment , "TEG DCT")
+    rglwidget()
+  })
+}
+
+shinyApp(ui, server)
+```
+
+## Visualización 3D de tu circuito mediante el uso de DEM SRTM suavizado con la técnica SVD:
+
+Descomposición del valor singular: varianza perdida(vl) determina cuantos Eigen values quedarse con tal de perder cierta cantidad de información
+
+```{r, echo=FALSE}
+ui <- fluidPage(
+  #numericInput("kx", "Type a value for kx between 1-0.1:", value = 0.1, min = 0.1, max = 1, step = 0.1),
+  numericInput("vl", "Type a value for vl between 0.99-0.01:", value = 0.05, min = 0.01, max = 0.99, step = 0.01),
+  actionButton("go", "Go"),
+  rglwidgetOutput("plot")
+)
+
+server <- function(input, output) {
+  raster_aux <- eventReactive(input$go, {
+    dct_or_dct(segment, dct =FALSE ,kx = 0.1, vl=input$vl)
+  })
+  
+  output$plot <- renderRglwidget({
+    three_plot_seg(raster_aux(), segment , "TEG SVD")
+    rglwidget()
+  })
+}
+
+shinyApp(ui, server)
+```
+
+
+## Cálculo de la TEG con todos los DEMs:
+```{r, echo=FALSE}
+ui <- fluidPage(
+  numericInput("kx", "Type a value for kx between 1-0.1:", value = 0.1, min = 0.1, max = 1, step = 0.1),
+  numericInput("vl", "Type a value for vl between 0.99-0.01:", value = 0.05, min = 0.01, max = 0.99, step = 0.01),
+  actionButton("go", "Go"),
+  tableOutput("df")
+)
+
+server <- function(input, output ) {
+  df <- eventReactive(input$go, {
+    TEG_DEMs(segment, kx = input$kx, vl = input$vl)
+  })
+  
+  output$df <- renderTable({
+    df()
+  })
+
+}
+
+shinyApp(ui, server)
+```
+
+
+
+
